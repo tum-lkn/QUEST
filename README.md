@@ -1,6 +1,9 @@
 # QUEST
 
-**QUEST: User-Based Quality of Service Aware Uplink Resource Scheduling**
+**A. Jano, S. Ayvaşik, Y. Deshpande and W. Kellerer, "QUEST: User-Based Quality of Service Aware Uplink Resource Scheduling", accepted in IEEE Transactions on Network and Service Management.**
+
+A closely related version is available as a TechRxiv preprint for reference:
+https://www.techrxiv.org/doi/pdf/10.36227/techrxiv.176110126.66841255/v1
 
 QUEST is a QoS-aware UL scheduling framework that exploits the 5G QoS model alongside network and device context to efficiently allocate radio resources.
 
