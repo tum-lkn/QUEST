@@ -1,0 +1,34 @@
+diff --git a/client.go b/client.go
+index fa02f57..88d32e7 100644
+--- a/client.go
++++ b/client.go
+@@ -314,11 +314,20 @@ func (c *Client) send(ctx context.Context) error {
+ 
+ 	// keep sending until the duration has passed
+ 	for {
++		at := c.Params.StampAt
++   		cl := c.Params.Clock
++   		rt := p.tsent.KeepClocks(cl)
++   		st := c.TimeSource.Now(cl)
++   		p.setTimestamp(at, Timestamp{rt, st})
++
+ 		// send to network and record times right before and after
+ 		tsend := c.rec.recordPreSend()
+ 		var err error
+ 		if clientDropsPercent == 0 || rand.Float32() > clientDropsPercent {
+ 			err = c.conn.send(p)
++			fmt.Printf("\n[S]Sent packet with seqno: %d", seqno, tsend)
++   			fmt.Printf("\n[S]Sent packet with timestamps:", p.timestamp())
++
+ 		} else {
+ 			// simulate drop with an average send time
+ 			time.Sleep(20 * time.Microsecond)
+@@ -433,7 +442,7 @@ func (c *Client) receive() error {
+ 			}
+ 		}
+ 		sts := p.timestamp()
+-
++		printf("\n[R]Packet received with timestamp", p.timestamp())
+ 		// record receive if all went well (may fail if seqno not found)
+ 		ok := c.rec.recordReceive(p, &sts)
+ 		if !ok {

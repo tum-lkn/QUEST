@@ -1,0 +1,505 @@
+diff --git a/openair2/GNB_APP/gnb_config.c b/openair2/GNB_APP/gnb_config.c
+index 3b5d159d34..eb18b9846d 100644
+--- a/openair2/GNB_APP/gnb_config.c
++++ b/openair2/GNB_APP/gnb_config.c
+@@ -1098,7 +1098,9 @@ static int read_du_cell_info(configmodule_interface_t *cfg,
+   info->nr_cellid = (uint64_t) * (GNBParamList.paramarray[0][GNB_NRCELLID_IDX].u64ptr);
+ 
+   LOG_W(GNB_APP, "no slices transported via F1 Setup Request!\n");
++  //Changed
+   info->num_ssi = 0;
++  //LOG_I(GNB_APP, "Supported sliced %d", info->num_ssi);
+ 
+   return 1;
+ }
+diff --git a/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h b/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
+index a39376ae25..6ace3f8af7 100644
+--- a/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
++++ b/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
+@@ -105,6 +105,8 @@ typedef struct {
+   uint8_t F: 1;
+   uint8_t R: 1;
+   uint16_t L: 16;
++  // HOL delay in microseconds
++  uint32_t HOL_delay: 32;
+ } __attribute__ ((__packed__)) NR_MAC_SUBHEADER_LONG;
+ 
+ typedef struct {
+@@ -112,7 +114,7 @@ typedef struct {
+   uint8_t R: 2;       // octet 1 [7:6]
+ } __attribute__ ((__packed__)) NR_MAC_SUBHEADER_FIXED;
+ 
+-static inline int get_mac_len(uint8_t* pdu, int pdu_len, uint16_t *mac_ce_len, uint16_t *mac_subheader_len) {
++static inline int get_mac_len(uint8_t* pdu, int pdu_len, uint16_t *mac_ce_len, uint16_t *mac_subheader_len, uint32_t *hol_ce_delay) {
+   if ( pdu_len < (int)sizeof(NR_MAC_SUBHEADER_SHORT))
+     return false;
+   NR_MAC_SUBHEADER_SHORT *s = (NR_MAC_SUBHEADER_SHORT*) pdu;
+@@ -122,6 +124,7 @@ static inline int get_mac_len(uint8_t* pdu, int pdu_len, uint16_t *mac_ce_len, u
+   if (s->F) {
+     *mac_subheader_len = sizeof(*l);
+     *mac_ce_len = ntohs(l->L);
++    *hol_ce_delay = ntohl(l->HOL_delay);
+   } else {
+     *mac_subheader_len = sizeof(*s);
+     *mac_ce_len = s->L;
+diff --git a/openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_ulsch.c b/openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_ulsch.c
+index b3aadd816d..a34b9411f1 100644
+--- a/openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_ulsch.c
++++ b/openair2/LAYER2/NR_MAC_gNB/gNB_scheduler_ulsch.c
+@@ -131,6 +131,8 @@ static int nr_process_mac_pdu(instance_t module_idP,
+ #endif
+ 
+   while (!done && pdu_len > 0){
++    // Added the HOL delay placeholder
++    uint32_t hol_delay=0;
+     uint16_t mac_len=0;
+     uint16_t mac_subheader_len=sizeof(NR_MAC_SUBHEADER_FIXED);
+     uint8_t rx_lcid = ((NR_MAC_SUBHEADER_FIXED *)pduP)->LCID;
+@@ -185,11 +187,12 @@ static int nr_process_mac_pdu(instance_t module_idP,
+            to be a partial PDU at the end of this buffer, so here
+            we gracefully ignore that by returning 0. See:
+            https://gitlab.eurecom.fr/oai/openairinterface5g/-/issues/534 */
+-        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len)) {
++        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len, &hol_delay)) {
+           LOG_E(NR_MAC, "pdu_len %d is invalid (shorter than MAC PDU header)\n", pdu_len);
+           return 0;
+         }
+         /* Extract long BSR value */
++        UE->HOL_delay = hol_delay;
+         ce_ptr = &pduP[mac_subheader_len];
+         NR_BSR_LONG *bsr_l = (NR_BSR_LONG *) ce_ptr;
+         sched_ctrl->estimated_ul_buffer = 0;
+@@ -284,7 +287,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
+         done = 1;
+         //38.321 section 6.1.3.9
+         //  variable length
+-        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len))
++        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len, &hol_delay))
+           return 0;
+         /* Extract MULTI ENTRY PHR elements from single octet bitmap for PHR calculation */
+         break;
+@@ -294,7 +297,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
+         done = 1;
+         //38.321 section 6.1.3.9
+         //  variable length
+-        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len))
++        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len, &hol_delay))
+           return 0;
+         /* Extract MULTI ENTRY PHR elements from four octets bitmap for PHR calculation */
+         break;
+@@ -306,10 +309,11 @@ static int nr_process_mac_pdu(instance_t module_idP,
+ 
+       case UL_SCH_LCID_SRB1:
+       case UL_SCH_LCID_SRB2:
+-        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len)) {
++        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len, &hol_delay)) {
+           LOG_E(NR_MAC, "pdu_len %d is invalid (shorter than MAC PDU header)\n", pdu_len);
+           return 0;
+         }
++        UE->HOL_delay = hol_delay;
+ 
+         rnti_t crnti = UE->rnti;
+         NR_UE_info_t* UE_idx = UE;
+@@ -329,6 +333,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
+         if (UE_idx->CellGroup) {
+           LOG_D(NR_MAC, "Frame %d : ULSCH -> UL-DCCH %d (gNB %ld, %d bytes), rnti: 0x%04x \n", frameP, rx_lcid, module_idP, mac_len, crnti);
+           UE->mac_stats.ul.total_sdu_bytes += mac_len;
++          // Reading UL data send from the UE
+           mac_rlc_data_ind(module_idP,
+                            crnti,
+                            module_idP,
+@@ -395,7 +400,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
+ 
+       case UL_SCH_LCID_DTCH ... (UL_SCH_LCID_DTCH + 28):
+         //  check if LCID is valid at current time.
+-        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len)) {
++        if (!get_mac_len(pduP, pdu_len, &mac_len, &mac_subheader_len, &hol_delay)) {
+           LOG_E(NR_MAC, "pdu_len %d is invalid (shorter than MAC PDU header)\n", pdu_len);
+           return 0;
+         }
+@@ -409,6 +414,7 @@ static int nr_process_mac_pdu(instance_t module_idP,
+               module_idP,
+               mac_len);
+         UE->mac_stats.ul.lc_bytes[rx_lcid] += mac_len;
++        UE->HOL_delay = hol_delay;
+ 
+         mac_rlc_data_ind(module_idP,
+                          UE->rnti,
+@@ -674,8 +680,8 @@ static void _nr_rx_sdu(const module_id_t gnb_mod_idP,
+         UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt++;
+         UE->mac_stats.ulsch_DTX++;
+       }
+-
+-      if (!get_softmodem_params()->phy_test && UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt >= pusch_failure_thres) {
++      //&& UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt >= pusch_failure_thres
++      if (!get_softmodem_params()->phy_test&& UE->UE_sched_ctrl.pusch_consecutive_dtx_cnt >= pusch_failure_thres) {
+         LOG_W(NR_MAC,
+               "UE %04x: Detected UL Failure on PUSCH after %d PUSCH DTX, stopping scheduling\n",
+               UE->rnti,
+@@ -1640,6 +1646,25 @@ static void pf_ul(module_id_t module_id,
+                   int n_rb_sched,
+                   uint16_t *rballoc_mask)
+ {
++  // Scheduler selection flags (only one should be enabled at a time)
++  // ---------------------------------------------------------------
++  bool pf_scheduler = true; // default OAI propotional fair scheduler
++  bool mt_scheduler = false; // maximum throughput
++  bool mlwdf_scheduler = false; // modified-largest weighted delay first
++  bool pb_scheduler = false; // priority-based
++  bool edf_scheduler = false; // earliest deadline first
++  bool quest_scheduler = false; // QUEST
++  
++  // Storing information needed for tracking the device behaviour
++  // Columns to store: FRAME, SLOT, UE RNTI, SINT, TBS, MCS NR. PRBS, DELAY
++  
++  FILE* outputFile = fopen("/home/lkn/test.csv", "a"); // Open the CSV file in append mode
++  if (outputFile == NULL) {
++    fprintf(stderr, "Error: Unable to open or create the file!\n");
++    return; // Return error code
++  }
++  
++  //----------------------------------------------------------------
+ 
+   const int CC_id = 0;
+   gNB_MAC_INST *nrmac = RC.nrmac[module_id];
+@@ -1671,6 +1696,37 @@ static void pf_ul(module_id_t module_id,
+     const float a = 0.01f;
+     const uint32_t b = stats->current_bytes;
+     UE->ul_thr_ue = (1 - a) * UE->ul_thr_ue + a * b;
++    //LOG_I(NR_MAC, "DELAY AT gNB %" PRIu32 "\n", UE->HOL_delay);
++    
++    // -------------------------------------------------------------
++    //Extract 5QI value for DRBs to account for experienced UL delay
++    int five_qi = 0;
++    for (int i = 0; i < sched_ctrl->dl_lc_num; i++) {
++      int lc_id = sched_ctrl->dl_lc_ids[i];
++      // Logical Channel IDs > 3 correspond to DRBs
++      if (lc_id > 3){
++        int drb_id = sched_ctrl->dl_lc_ids[i]-3;
++        for (int q = 0; q < sched_ctrl->nr_qos_flows; q++) {
++          five_qi=sched_ctrl->qos_config[drb_id - 1][q].fiveQI;
++        } 
++      } 
++    }
++
++    char filePath[256];
++    sprintf(filePath,"/home/lkn/delay_%d.txt", five_qi);
++    FILE * inputFile = fopen(filePath, "r");
++    if (inputFile!=NULL) {
++      float currdelay;
++      if(fscanf(inputFile, "%f", &currdelay)); 
++      UE->ul_delay_ue = currdelay;
++      //LOG_I(NR_MAC,"pf_ul: UE %04x delay %f, %d\n",UE->rnti,UE->ul_delay_ue, five_qi);
++    }
++    else{
++      LOG_I(NR_MAC, "File not found %s, 5QI%d.\n", strerror(errno), five_qi);
++    }
++    fclose(inputFile); 
++    
++    // -----------------------------------------------------------------------
+ 
+     if(remainUEs == 0)
+       continue;
+@@ -1805,7 +1861,94 @@ static void pf_ul(module_id_t module_id,
+     /* Create UE_sched for UEs eligibale for new data transmission*/
+     /* Calculate coefficient*/
+     const uint32_t tbs = ul_pf_tbs[current_BWP->mcs_table][sched_pusch->mcs];
+-    float coeff_ue = (float) tbs / UE->ul_thr_ue;
++    float coeff_ue = 0;
++
++    // Iterate over the schedulers to define the scheduling priority of UEs
++    if (pf_scheduler){
++      LOG_D(NR_MAC, "Propotional Fair scheduler");
++      coeff_ue = (float) tbs / UE->ul_thr_ue;
++    }
++    else if (mt_scheduler){
++      LOG_D(NR_MAC, "Max CQI scheduler");
++      coeff_ue = (float) tbs;
++      }
++    else if (pb_scheduler){
++      LOG_D(NR_MAC, "5QI based scheduler");
++      float priority = 1;
++       for (int i = 0; i < sched_ctrl->dl_lc_num; i++) {
++        int lc_id = sched_ctrl->dl_lc_ids[i];
++        if (lc_id > 3){
++          int drb_id = sched_ctrl->dl_lc_ids[i]-3;
++          for (int q = 0; q < sched_ctrl->nr_qos_flows; q++) {
++            priority = (float) (sched_ctrl->qos_config[drb_id-1][q].priority/90.0);
++          } 
++        } 
++      }
++      coeff_ue = (float) 1/priority;
++    }
++    else if (edf_scheduler){
++      LOG_D(NR_MAC, "Delay based scheduler");
++      float app_delay = 0;
++       for (int i = 0; i < sched_ctrl->dl_lc_num; i++) {
++        int lc_id = sched_ctrl->dl_lc_ids[i];
++        if (lc_id > 3){
++          int drb_id = sched_ctrl->dl_lc_ids[i]-3;
++          for (int q = 0; q < sched_ctrl->nr_qos_flows; q++) {
++            app_delay = sched_ctrl->qos_config[drb_id-1][q].packet_delay;
++          } 
++        } 
++      }
++      if (app_delay!= 0.0){
++        coeff_ue =(float) (1/ max(0.001f, (app_delay-(UE->HOL_delay/1000.0))));
++        //printf("Application delay %f, coeff_ue %f, HOL delay %f \n", app_delay, coeff_ue, UE->HOL_delay/1000.0);
++      }
++    }
++    else if (quest_scheduler){
++      LOG_D(NR_MAC, "QoS based scheduler");
++      int epsilon = 1;
++      //int psi = 1;
++      float priority = 1;
++      float app_delay = 0;
++      for (int i = 0; i < sched_ctrl->dl_lc_num; i++) {
++        int lc_id = sched_ctrl->dl_lc_ids[i];
++        if (lc_id > 3){
++          int drb_id = sched_ctrl->dl_lc_ids[i]-3;
++          for (int q = 0; q < sched_ctrl->nr_qos_flows; q++) {
++            priority = (float)sched_ctrl->qos_config[drb_id-1][q].priority/90.0;
++            app_delay = sched_ctrl->qos_config[drb_id-1][q].packet_delay;
++            //printf("Delay %" PRIu32" , %" PRIu32"\n", app_delay, UE->HOL_delay);
++            
++          } 
++        } 
++      }
++      if (app_delay!= 0.0){
++        coeff_ue = (float) 1/priority* (tbs/max(0.001f,(app_delay-(UE->HOL_delay/1000.0))));
++      }
++    }
++    else if (mlwdf_scheduler){
++      LOG_D(NR_MAC, "SoTA scheduler");
++      int epsilon = 1;
++      int psi = 1;
++      float app_delay = 0;
++      float app_error = 1;
++      for (int i = 0; i < sched_ctrl->dl_lc_num; i++) {
++      int lc_id = sched_ctrl->dl_lc_ids[i];
++      if (lc_id > 3){
++        int drb_id = sched_ctrl->dl_lc_ids[i]-3;
++        for (int q = 0; q < sched_ctrl->nr_qos_flows; q++) {
++          app_delay = sched_ctrl->qos_config[drb_id-1][q].packet_delay;
++          app_error = sched_ctrl->qos_config[drb_id-1][q].packet_error_rate;
++          //printf("Delay %" PRIu32" , %" PRIu32"\n", app_delay, UE->HOL_delay);
++          } 
++        } 
++      }
++      if (app_delay!= 0.0){
++
++      coeff_ue = ((-log(app_error)/app_delay)*(UE->HOL_delay/1000.0)) * ((float) pow(tbs,epsilon) / pow(UE->ul_thr_ue,psi));
++     } 
++    }
++    
++    // --------------------------------------------
+     LOG_D(NR_MAC, "[UE %04x][%4d.%2d] b %d, ul_thr_ue %f, tbs %d, coeff_ue %f\n",
+           UE->rnti,
+           frame,
+@@ -1927,12 +2070,16 @@ static void pf_ul(module_id_t module_id,
+     for (int rb = 0; rb < sched_ctrl->sched_pusch.rbSize; rb++)
+       rballoc_mask[rb + sched_ctrl->sched_pusch.rbStart] ^= slbitmap;
+ 
++    // Storing information fo each UE to the file
++    fprintf(outputFile, "%4d, %2d ,%04x, %f, %d, %2d, %d, %d, %f, %f\n", sched_pusch->frame, sched_pusch->slot ,iterator->UE->rnti, (float)sched_ctrl->pusch_snrx10/10.0, sched_pusch->tb_size, sched_pusch->mcs, sched_pusch->rbSize, B, iterator->UE->HOL_delay/1000.0,iterator->UE->ul_delay_ue);
+     /* reduce max_num_ue once we are sure UE can be allocated, i.e., has CCE */
+     remainUEs--;
+     iterator++;
+   }
++  fclose(outputFile);
+ }
+ 
++
+ static bool nr_fr1_ulsch_preprocessor(module_id_t module_id, frame_t frame, sub_frame_t slot)
+ {
+   gNB_MAC_INST *nr_mac = RC.nrmac[module_id];
+@@ -2023,7 +2170,6 @@ static bool nr_fr1_ulsch_preprocessor(module_id_t module_id, frame_t frame, sub_
+   int bw = scc->uplinkConfigCommon->frequencyInfoUL->scs_SpecificCarrierList.list.array[0]->carrierBandwidth;
+   int average_agg_level = 4; // TODO find a better estimation
+   int max_sched_ues = bw / (average_agg_level * NR_NB_REG_PER_CCE);
+-
+   /* proportional fair scheduling algorithm */
+   pf_ul(module_id,
+         frame,
+diff --git a/openair2/LAYER2/NR_MAC_gNB/mac_rrc_dl_handler.c b/openair2/LAYER2/NR_MAC_gNB/mac_rrc_dl_handler.c
+index 13aa2a3546..7dd9895ab5 100644
+--- a/openair2/LAYER2/NR_MAC_gNB/mac_rrc_dl_handler.c
++++ b/openair2/LAYER2/NR_MAC_gNB/mac_rrc_dl_handler.c
+@@ -30,9 +30,16 @@
+ #include "uper_encoder.h"
+ 
+ // Standarized 5QI values and Default Priority levels as mentioned in 3GPP TS 23.501 Table 5.7.4-1
+-const uint64_t qos_fiveqi[26] = {1, 2, 3, 4, 65, 66, 67, 71, 72, 73, 74, 76, 5, 6, 7, 8, 9, 69, 70, 79, 80, 82, 83, 84, 85, 86};
+-const uint64_t qos_priority[26] = {20, 40, 30, 50, 7, 20, 15, 56, 56, 56, 56, 56, 10,
+-                                   60, 70, 80, 90, 5, 55, 65, 68, 19, 22, 24, 21, 18};
++const uint64_t qos_fiveqi[30] = {1, 2, 3, 4, 65, 66, 67, 71, 72, 73, 74, 76, 5, 6, 7, 8, 9, 69, 70, 79, 80, 82, 83, 84, 85, 86, 87, 88, 89, 90};
++const uint64_t qos_priority[30] = {5, 40, 25, 5, 7, 20, 15, 56, 56, 56, 56, 56, 10,
++                                   60, 70, 80, 90, 5, 55, 65, 68, 19, 22, 24, 21, 18, 25, 25, 25, 25};
++//Index corresponding to qfi value                               
++const uint64_t packet_delay[30] = {60, 150, 30, 60, 75, 100, 100, 150, 300, 300, 500, 500, 100, 300, 100, 300, 300, 60, 200, 
++                                    50, 10, 10, 10, 30, 5, 5};
++const float packet_error[30] = {0.000001, 0.001, 0.00001, 0.000001, 0.01, 0.01, 0.001, 0.000001, 0.0001, 0.00000001, 0.00000001,
++                             0.0001, 0.000001, 0.000001, 0.001, 0.000001, 0.000001, 0.000001, 0.000001, 0.01, 0.000001,
++                             0.0001, 0.0001, 0.00001, 0.00001, 0.0001, 0.001,  0.001};
++                                    
+ 
+ static long get_lcid_from_drbid(int drb_id)
+ {
+@@ -259,6 +266,7 @@ static void set_QoSConfig(const f1ap_ue_context_modif_req_t *req, NR_UE_sched_ct
+   for (int i = 0; i < drb_count; i++) {
+     f1ap_drb_to_be_setup_t *drb_p = &req->drbs_to_be_setup[i];
+     uint8_t nb_qos_flows = drb_p->drb_info.flows_to_be_setup_length;
++    sched_ctrl->nr_qos_flows = nb_qos_flows;
+     long drb_id = drb_p->drb_id;
+     LOG_I(NR_MAC, "number of QOS flows mapped to DRB_id %ld: %d\n", drb_id, nb_qos_flows);
+ 
+@@ -267,26 +275,37 @@ static void set_QoSConfig(const f1ap_ue_context_modif_req_t *req, NR_UE_sched_ct
+ 
+       f1ap_qos_characteristics_t *qos_char = &qos_flow->qos_params.qos_characteristics;
+       uint64_t priority = qos_char->non_dynamic.qos_priority_level;
++      uint64_t delay = 0;
++      float error_rate = 1;
+       int64_t fiveqi = qos_char->non_dynamic.fiveqi;
+       if (qos_char->qos_type == dynamic) {
+         priority = qos_char->dynamic.qos_priority_level;
+         fiveqi = qos_char->dynamic.fiveqi > 0 ? qos_char->dynamic.fiveqi : 0;
+       }
++      printf("5QI  %" PRId64 "\n",fiveqi);
+       if (qos_char->qos_type == non_dynamic) {
+         LOG_D(NR_MAC, "Qos Priority level is considered from the standarsdized 5QI to QoS mapping table\n");
+         for (int id = 0; id < 26; id++) {
+-          if (qos_fiveqi[id] == fiveqi)
++          if (qos_fiveqi[id] == fiveqi){
+             priority = qos_priority[id];
++            //packet delay budget and packet error rate
++            delay = packet_delay[id];
++            error_rate = packet_error[id];
++          }
+         }
+       }
+       sched_ctrl->qos_config[drb_id - 1][q].fiveQI = fiveqi;
+       sched_ctrl->qos_config[drb_id - 1][q].priority = priority;
+-      LOG_D(NR_MAC,
+-            "In %s: drb_id %ld: 5QI %lu priority %lu\n",
++      sched_ctrl->qos_config[drb_id - 1][q].packet_delay = delay;
++      sched_ctrl->qos_config[drb_id - 1][q].packet_error_rate = error_rate;
++
++      LOG_I(NR_MAC,
++            "In %s: drb_id %ld: 5QI %lu priority %lu delay %lu \n",
+             __func__,
+             drb_id,
+             sched_ctrl->qos_config[drb_id - 1][q].fiveQI,
+-            sched_ctrl->qos_config[drb_id - 1][q].priority);
++            sched_ctrl->qos_config[drb_id - 1][q].priority,
++            sched_ctrl->qos_config[drb_id - 1][q].packet_delay);
+     }
+   }
+ }
+diff --git a/openair2/LAYER2/NR_MAC_gNB/nr_mac_gNB.h b/openair2/LAYER2/NR_MAC_gNB/nr_mac_gNB.h
+index f2c66bd99f..e1c1072364 100644
+--- a/openair2/LAYER2/NR_MAC_gNB/nr_mac_gNB.h
++++ b/openair2/LAYER2/NR_MAC_gNB/nr_mac_gNB.h
+@@ -541,6 +541,9 @@ typedef struct NR_UE_ul_harq {
+ typedef struct NR_QoS_config_s {
+   uint64_t fiveQI;
+   uint64_t priority;
++  //Added indormation
++  uint64_t packet_delay;
++  float packet_error_rate;
+ } NR_QoS_config_t;
+ 
+ /*! \brief scheduling control information set through an API */
+@@ -642,7 +645,8 @@ typedef struct {
+   /// sri, ul_ri and tpmi based on SRS
+   nr_srs_feedback_t srs_feedback;
+   nssai_t dl_lc_nssai[NR_MAX_NUM_LCID];
+-
++  uint8_t nr_qos_flows;
++  //---------------------
+   // Information about the QoS configuration for each LCID/DRB
+   NR_QoS_config_t qos_config[NR_MAX_NUM_LCID - 4][NR_MAX_NUM_QFI]; // 0 -CCCH and 1- 3 SRBs(0,1,2)
+ } NR_UE_sched_ctrl_t;
+@@ -716,6 +720,10 @@ typedef struct {
+   float ul_thr_ue;
+   float dl_thr_ue;
+   long pdsch_HARQ_ACK_Codebook;
++  // Added HOL delay
++  float ul_delay_ue;
++  uint32_t HOL_delay;
++  // --------------
+ } NR_UE_info_t;
+ 
+ typedef struct {
+diff --git a/openair2/NR_PHY_INTERFACE/NR_IF_Module.c b/openair2/NR_PHY_INTERFACE/NR_IF_Module.c
+index 37bedddf46..f0201e6371 100644
+--- a/openair2/NR_PHY_INTERFACE/NR_IF_Module.c
++++ b/openair2/NR_PHY_INTERFACE/NR_IF_Module.c
+@@ -196,7 +196,7 @@ void handle_nr_ulsch(NR_UL_IND_t *UL_info)
+             UL_info->slot,
+             crc->tb_crc_status ? "error" : "ok",
+             crc->tb_crc_status);
+-
++            
+       /* if CRC passes, pass PDU, otherwise pass NULL as error indication */
+       nr_rx_sdu(UL_info->module_id,
+                 UL_info->CC_id,
+diff --git a/openair2/RRC/NR/rrc_gNB.c b/openair2/RRC/NR/rrc_gNB.c
+index 513e874073..e6aa1c5016 100644
+--- a/openair2/RRC/NR/rrc_gNB.c
++++ b/openair2/RRC/NR/rrc_gNB.c
+@@ -2074,6 +2074,8 @@ unsigned int mask_flip(unsigned int x) {
+ static pdusession_level_qos_parameter_t *get_qos_characteristics(const int qfi, rrc_pdu_session_param_t *pduSession)
+ {
+   pdusession_t *pdu = &pduSession->param;
++  //Included printing
++  LOG_I(RRC, "Checking the PDU session SST: %d, ST: %d, QFI: %d", pdu->nssai.sst, pdu->nssai.sd, qfi);
+   for (int i = 0; i < pdu->nb_qos; i++) {
+     if (qfi == pdu->qos[i].qfi)
+       return &pdu->qos[i];
+@@ -2143,11 +2145,16 @@ void rrc_gNB_process_e1_bearer_context_setup_resp(e1ap_bearer_setup_resp_t *resp
+         f1ap_qos_characteristics_t *qos_char = &drb->drb_info.flows_mapped_to_drb[j].qos_params.qos_characteristics;
+         if (in_qos_char->fiveQI_type == dynamic) {
+           qos_char->qos_type = dynamic;
+-          qos_char->dynamic.fiveqi = in_qos_char->fiveQI;
++          //qos_char->dynamic.fiveqi = in_qos_char->fiveQI;
++          //Use QFI instead of 5QI to correctly map QoS flos (support up to 32 flows)
++          qos_char->dynamic.fiveqi = in_qos_char->qfi;
++          LOG_I(RRC, "Dynamic Checking the PDU session: PDU QFI: %ld , %d\n", qos_char->dynamic.fiveqi, in_qos_char->qfi);
+           qos_char->dynamic.qos_priority_level = in_qos_char->qos_priority;
+         } else {
+           qos_char->qos_type = non_dynamic;
+-          qos_char->non_dynamic.fiveqi = in_qos_char->fiveQI;
++          //qos_char->non_dynamic.fiveqi = in_qos_char->fiveQI;
++          qos_char->non_dynamic.fiveqi = in_qos_char->qfi;
++          LOG_I(RRC, "Non Dynamic Checking the PDU session: PDU QFI: %ld , %d\n", qos_char->non_dynamic.fiveqi, in_qos_char->qfi);
+           qos_char->non_dynamic.qos_priority_level = in_qos_char->qos_priority;
+         }
+       }
+diff --git a/openair2/RRC/NR/rrc_gNB_NGAP.c b/openair2/RRC/NR/rrc_gNB_NGAP.c
+index 2fafec982a..31fc27ab16 100644
+--- a/openair2/RRC/NR/rrc_gNB_NGAP.c
++++ b/openair2/RRC/NR/rrc_gNB_NGAP.c
+@@ -268,10 +268,13 @@ static void fill_qos(NGAP_QosFlowSetupRequestList_t *qos, pdusession_t *session)
+       AssertFatal(qosChar->choice.dynamic5QI, "Non-Dynamic 5QI is NULL\n");
+       session->qos[qosIdx].fiveQI_type = non_dynamic;
+       session->qos[qosIdx].fiveQI = (uint64_t)qosChar->choice.nonDynamic5QI->fiveQI;
++      //Printing to check the mapping of 5QI to QFI
++      LOG_I(NGAP, "Checking NGAP PDU session fiveQI: %ld , %d\n", session->qos[qosIdx].fiveQI, session->qos[qosIdx].qfi);
+     } else {
+       AssertFatal(qosChar->choice.dynamic5QI, "Dynamic 5QI is NULL\n");
+       session->qos[qosIdx].fiveQI_type = dynamic;
+       session->qos[qosIdx].fiveQI = (uint64_t)(*qosChar->choice.dynamic5QI->fiveQI);
++      LOG_I(NGAP, "Checking NGAP PDU session fiveQI: %ld , %d\n", session->qos[qosIdx].fiveQI, session->qos[qosIdx].qfi);
+     }
+ 
+     ngap_allocation_retention_priority_t *tmp = &session->qos[qosIdx].allocation_retention_priority;
+@@ -426,7 +429,8 @@ static void trigger_bearer_setup(gNB_RRC_INST *rrc, gNB_RRC_UE_t *UE, int n, pdu
+       for (int k=0; k < drb->numQosFlow2Setup; k++) {
+         qos_flow_to_setup_t *qos_flow = drb->qosFlows + k;
+         pdusession_level_qos_parameter_t *qos_session = session->qos + k;
+-
++        //Checking QFI value
++        LOG_I(NR_RRC, "Checking the QFI values %d\n", session->qos->qfi);
+         qos_characteristics_t *qos_char = &qos_flow->qos_params.qos_characteristics;
+         qos_flow->qfi = qos_session->qfi;
+         qos_char->qos_type = qos_session->fiveQI_type;

@@ -1,0 +1,315 @@
+diff --git a/conn.go b/conn.go
+index c8f1502..b2d5044 100644
+--- a/conn.go
++++ b/conn.go
+@@ -443,6 +443,8 @@ func (l *lconn) receive(p *packet) (err error) {
+ 	}
+ 	p.srcIP = nil
+ 	p.dscp = 0
++	printf("[R] Server received the packet with timestamp: ", p.timestamp())
++	myPacket["clientSent"] = p.timestamp()
+ 	p.trcvd = l.timeSource.Now(BothClocks)
+ 	p.tsent = Time{}
+ 	if err != nil {
+@@ -654,4 +656,4 @@ func resolveListenAddrs(addrs []string, ipVer IPVersion) (laddrs []*net.UDPAddr,
+ 		}
+ 	}
+ 	return
+-}
++}
+\ No newline at end of file
+diff --git a/defaults.go b/defaults.go
+index 57100bb..0e13230 100644
+--- a/defaults.go
++++ b/defaults.go
+@@ -76,6 +76,9 @@ const (
+ 	DefaultSetECN        = false
+ )
+ 
++var  DefaultFile = []string{"output.json"}
++var  RDefaultFile = []string{"routput.json"}
++
+ // DefaultBindAddrs are the default bind addresses.
+ var DefaultBindAddrs = []string{":2112"}
+ 
+diff --git a/go.mod b/go.mod
+index d946e12..9b7733b 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,10 +1,12 @@
+ module github.com/heistp/irtt
+ 
+-go 1.12
++go 1.25.0
+ 
+ require (
++	github.com/bramvdbogaerde/go-scp v1.6.0
+ 	github.com/ogier/pflag v0.0.2-0.20160129220114-45c278ab3607
+ 	github.com/pkg/profile v1.3.0
+-	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
+-	golang.org/x/sys v0.0.0-20210514084401-e8d321eab015
++	golang.org/x/crypto v0.50.0
++	golang.org/x/net v0.52.0
++	golang.org/x/sys v0.43.0
+ )
+diff --git a/go.sum b/go.sum
+index 8026a95..6f96835 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1,13 +1,14 @@
++github.com/bramvdbogaerde/go-scp v1.6.0 h1:lDh0lUuz1dbIhJqlKLwWT7tzIRONCp1Mtx3pgQVaLQo=
++github.com/bramvdbogaerde/go-scp v1.6.0/go.mod h1:on2aH5AxaFb2G0N5Vsdy6B0Ml7k9HuHSwfo1y0QzAbQ=
+ github.com/ogier/pflag v0.0.2-0.20160129220114-45c278ab3607 h1:xZoOomu8/sOa+6Q469LrXeyq2YsmkhZo8wU6EzNWMDg=
+ github.com/ogier/pflag v0.0.2-0.20160129220114-45c278ab3607/go.mod h1:zkFki7tvTa0tafRvTBIZTvzYyAu6kQhPZFnshFFPE+g=
+ github.com/pkg/profile v1.3.0 h1:OQIvuDgm00gWVWGTf4m4mCt6W1/0YqU7Ntg0mySWgaI=
+ github.com/pkg/profile v1.3.0/go.mod h1:hJw3o1OdXxsrSjjVksARp5W95eeEaEfptyVZyv6JUPA=
+-golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4 h1:4nGaVu0QrbjT/AK2PRLuQfQuh6DJve+pELhqTdAj3x0=
+-golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4/go.mod h1:p54w0d4576C0XHj96bSt6lcn1PtDYWL6XObtHCRCNQM=
+-golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+-golang.org/x/sys v0.0.0-20210330210617-4fbd30eecc44/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+-golang.org/x/sys v0.0.0-20210514084401-e8d321eab015 h1:hZR0X1kPW+nwyJ9xRxqZk1vx5RUObAPBdKVvXPDUH/E=
+-golang.org/x/sys v0.0.0-20210514084401-e8d321eab015/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+-golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+-golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+-golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
++golang.org/x/crypto v0.50.0 h1:zO47/JPrL6vsNkINmLoo/PH1gcxpls50DNogFvB5ZGI=
++golang.org/x/crypto v0.50.0/go.mod h1:3muZ7vA7PBCE6xgPX7nkzzjiUq87kRItoJQM1Yo8S+Q=
++golang.org/x/net v0.52.0 h1:He/TN1l0e4mmR3QqHMT2Xab3Aj3L9qjbhRm78/6jrW0=
++golang.org/x/net v0.52.0/go.mod h1:R1MAz7uMZxVMualyPXb+VaqGSa3LIaUqk0eEt3w36Sw=
++golang.org/x/sys v0.43.0 h1:Rlag2XtaFTxp19wS8MXlJwTvoh8ArU6ezoyFsMyCTNI=
++golang.org/x/sys v0.43.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
++golang.org/x/term v0.42.0 h1:UiKe+zDFmJobeJ5ggPwOshJIVt6/Ft0rcfrXZDLWAWY=
++golang.org/x/term v0.42.0/go.mod h1:Dq/D+snpsbazcBG5+F9Q1n2rXV8Ma+71xEjTRufARgY=
+diff --git a/irtt_server.go b/irtt_server.go
+index f994cbb..d4014e7 100644
+--- a/irtt_server.go
++++ b/irtt_server.go
+@@ -5,9 +5,13 @@ import (
+ 	"os/signal"
+ 	"strings"
+ 	"syscall"
+-
++	"log"
++        "golang.org/x/crypto/ssh"
++	"github.com/bramvdbogaerde/go-scp"
+ 	flag "github.com/ogier/pflag"
+ )
++var myPacket = make(map[string]interface{})
++var scpClient scp.Client
+ 
+ func serverUsage() {
+ 	setBufio()
+@@ -81,7 +85,9 @@ func runServerCLI(args []string) {
+ 	fs.Usage = func() {
+ 		usageAndExit(serverUsage, exitCodeBadCommandLine)
+ 	}
+-	var baddrsStr = fs.StringP("b", "b", strings.Join(DefaultBindAddrs, ","), "bind addresses")
++	var output = fs.StringP("o", "o",strings.Join(DefaultFile, ","), "output file")
++	var routput = fs.StringP("r", "r",strings.Join(DefaultFile, ","), "remote output file")
++        var baddrsStr = fs.StringP("b", "b", strings.Join(DefaultBindAddrs, ","), "bind addresses")
+ 	var maxDuration = fs.DurationP("d", "d", DefaultMaxDuration, "max duration")
+ 	var minInterval = fs.DurationP("i", "i", DefaultMinInterval, "min interval")
+ 	var maxLength = fs.IntP("l", "l", DefaultMaxLength, "max length")
+@@ -146,6 +152,8 @@ func runServerCLI(args []string) {
+ 
+ 	// create server config
+ 	cfg := NewServerConfig()
++        cfg.File =strings.Split(*output, ",")
++	cfg.RFile =strings.Split(*routput, ",")
+ 	cfg.Addrs = strings.Split(*baddrsStr, ",")
+ 	cfg.MaxDuration = *maxDuration
+ 	cfg.MinInterval = *minInterval
+@@ -164,8 +172,35 @@ func runServerCLI(args []string) {
+ 	cfg.ThreadLock = *lockOSThread
+ 
+ 	// create server
++	//s := NewServer(cfg)
++	// SSH connection configuration
++	sshConfig := &ssh.ClientConfig{
++		User: "lkn",
++		Auth: []ssh.AuthMethod{
++			ssh.Password("lkn"),
++		},
++		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
++	}
++
++	// Connect to the SSH server
++	conn, err := ssh.Dial("tcp", "10.162.83.97:22", sshConfig)
++	if err != nil {
++		log.Fatalf("Failed to connect to SSH server: %v", err)
++	}
++	defer conn.Close()
++
++	// Create a new SCP client
++	scpClient = scp.NewClient("10.162.83.97:22", sshConfig)
++       // Connect to the remote server
++	err = scpClient.Connect()
++	if err != nil {
++		log.Fatalf("Couldn't establish a connection to the remote server ", err)
++		return
++	}
++ 
+ 	s := NewServer(cfg)
+ 
++
+ 	// install signal handler to stop server
+ 	sigs := make(chan os.Signal, 1)
+ 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+diff --git a/sconfig.go b/sconfig.go
+index 2166189..fe14965 100644
+--- a/sconfig.go
++++ b/sconfig.go
+@@ -21,6 +21,9 @@ type ServerConfig struct {
+ 	SetSrcIP    bool
+ 	TimeSource  TimeSource
+ 	ThreadLock  bool
++	File 	    []string
++    RFile       []string
++
+ }
+ 
+ // NewServerConfig returns a new ServerConfig with the default settings.
+@@ -41,5 +44,7 @@ func NewServerConfig() *ServerConfig {
+ 		SetSrcIP:    DefaultSetSrcIP,
+ 		TimeSource:  DefaultTimeSource,
+ 		ThreadLock:  DefaultThreadLock,
++		File: 	     DefaultFile,
++		RFile:       RDefaultFile,  
+ 	}
+-}
++}
+\ No newline at end of file
+diff --git a/sconn.go b/sconn.go
+index 1b1d69e..61635f9 100644
+--- a/sconn.go
++++ b/sconn.go
+@@ -1,9 +1,14 @@
++
+ package irtt
+ 
+ import (
+ 	"math/rand"
+ 	"net"
+ 	"time"
++	"encoding/json"
++	"fmt"
++	"os"
++	"context"
+ )
+ 
+ // sconn stores the state for a client's connection to the server
+@@ -156,6 +161,8 @@ func (sc *sconn) serveEcho(p *packet) (closed bool, err error) {
+ 
+ 	// slide received seqno window
+ 	seqno := p.seqno()
++	printf("[R] Server received the packet with seqno:%d ", seqno)
++	myPacket["seqno"] = seqno
+ 	sinceLastSeqno := seqno - sc.lastSeqno
+ 	if sinceLastSeqno > 0 {
+ 		sc.receivedWindow <<= sinceLastSeqno
+@@ -229,7 +236,72 @@ func (sc *sconn) serveEcho(p *packet) (closed bool, err error) {
+ 	} else {
+ 		p.removeTimestamps()
+ 	}
++	printf("[S] Server receives and sends the packet at time: ", p.timestamp())
++	printf("\n")
++	myPacket["ServerReceive"] = p.timestamp()
++
++	// Convert the map to JSON
++	jsonData, err := json.MarshalIndent(myPacket, "", "  ")
++        
++	if err != nil {
++		fmt.Println("Error marshaling to JSON:", err)
++		return
++	}
++
++       var data map[string]interface{}
++       err = json.Unmarshal(jsonData, &data)
++       if err != nil {
++           fmt.Println("Error unmarshaling JSON:", err)
++           return
++       }
++	// Open or create the file
++	file, err := os.OpenFile(sc.File[0], os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
++	if err != nil {
++		fmt.Println("Error opening file:", err)
++		return
++	}
++	defer file.Close()
+ 
++	// Truncate the file to clear existing content
++        err = file.Truncate(0)
++	if err != nil {
++		fmt.Println("Error truncating file:", err)
++		return
++	}
++        serverReceive, ok := data["ServerReceive"].(map[string]interface{})
++        if !ok {
++            fmt.Println("Error: ServerReceive field not found or is not a map")
++            return
++        }
++        receive, ok := serverReceive["receive"].(map[string]interface{})
++        if !ok {
++	   fmt.Println("Error: receive field not found or is not a map")
++	   return
++	}
++        receive_wall, ok := receive["wall"].(float64) // Use float64 for JSON numbers
++        if !ok {
++	   fmt.Println("Error: wall field not found or is not a number")
++	   return
++	}
++
++        clientSent, ok := data["clientSent"].(map[string]interface{})
++        if !ok {
++           fmt.Println("Error: clientSent field not found or is not a map")
++           return
++        }
++
++        send, ok := clientSent["send"].(map[string]interface{})
++        if !ok {
++           fmt.Println("Error: send field not found or is not a map")
++           return
++        }
++        send_wall, ok := send["wall"].(float64) // Use float64 for JSON numbers
++        if !ok {
++           fmt.Println("Error:send wall field not found or is not a number")
++           return
++        }
++
++        
+ 	// set length
+ 	p.setLen(sc.params.Length)
+ 
+@@ -256,7 +328,24 @@ func (sc *sconn) serveEcho(p *packet) (closed bool, err error) {
+ 
+ 	// send reply
+ 	err = sc.conn.send(p)
+-	return
++        difference := float64(receive_wall-send_wall) / 1000000
++        // Add newline if you want to store a csv file
++        result := fmt.Sprintf("%.6f", difference)
++        _, err = file.Write([]byte(result))
++        //_, err = file.Write(jsonData)
++        if err != nil {
++                fmt.Println("Error writing to file:", err)
++                return
++        }
++        defer file.Close()
++	f, _ := os.Open(sc.File[0])
++        defer f.Close()
++        err = scpClient.CopyFile(context.Background(), f, sc.RFile[0], "0644")
++        if err != nil {
++                fmt.Println("Error transfering the file:", err)
++		return 
++	}
++        return
+ }
+ 
+ func (sc *sconn) expired() bool {
+@@ -291,4 +380,4 @@ func (sc *sconn) restrictParams(p *Params) {
+ 		p.ServerFill = DefaultServerFiller.String()
+ 	}
+ 	return
+-}
++}
+\ No newline at end of file

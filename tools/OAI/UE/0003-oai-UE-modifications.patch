@@ -1,0 +1,178 @@
+diff --git a/common/ran_context.h b/common/ran_context.h
+index 244e6fd30d..b0311bcf2e 100644
+--- a/common/ran_context.h
++++ b/common/ran_context.h
+@@ -114,3 +114,17 @@ extern RAN_CONTEXT_t RC;
+ 
+ #define NB_eNB_INST RC.nb_inst
+ #endif
++
++
++#ifndef UC_H
++#define UC_H
++
++#include <stdint.h>
++
++typedef struct{
++uint32_t HOL_delay;
++} UE_CONTEXT_t;
++
++extern UE_CONTEXT_t UC;
++
++#endif // UC_H
+diff --git a/executables/nr-uesoftmodem.c b/executables/nr-uesoftmodem.c
+index de1c97a07b..4817b22dea 100644
+--- a/executables/nr-uesoftmodem.c
++++ b/executables/nr-uesoftmodem.c
+@@ -109,6 +109,7 @@ int get_node_type() {return -1;}
+ 
+ RAN_CONTEXT_t RC;
+ int oai_exit = 0;
++UE_CONTEXT_t UC;
+ 
+ 
+ extern int16_t  nr_dlsch_demod_shift;
+diff --git a/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h b/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
+index a39376ae25..71d273edd6 100644
+--- a/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
++++ b/openair2/LAYER2/NR_MAC_COMMON/nr_mac.h
+@@ -105,6 +105,8 @@ typedef struct {
+   uint8_t F: 1;
+   uint8_t R: 1;
+   uint16_t L: 16;
++  //Added HOL delay field in BSR
++  uint32_t HOL_delay: 32;
+ } __attribute__ ((__packed__)) NR_MAC_SUBHEADER_LONG;
+ 
+ typedef struct {
+diff --git a/openair2/LAYER2/NR_MAC_UE/nr_ue_procedures.c b/openair2/LAYER2/NR_MAC_UE/nr_ue_procedures.c
+index bbbed17648..9bc291d1d0 100644
+--- a/openair2/LAYER2/NR_MAC_UE/nr_ue_procedures.c
++++ b/openair2/LAYER2/NR_MAC_UE/nr_ue_procedures.c
+@@ -57,6 +57,9 @@
+ #include "oai_asn1.h"
+ #include "common/utils/LOG/log.h"
+ #include "common/utils/LOG/vcd_signal_dumper.h"
++#include "common/ran_context.h"
++
++extern UE_CONTEXT_t UC;
+ 
+ // #define DEBUG_MIB
+ // #define ENABLE_MAC_PAYLOAD_DEBUG 1
+diff --git a/openair2/LAYER2/NR_MAC_UE/nr_ue_scheduler.c b/openair2/LAYER2/NR_MAC_UE/nr_ue_scheduler.c
+index dc5da31ca9..7732dec732 100644
+--- a/openair2/LAYER2/NR_MAC_UE/nr_ue_scheduler.c
++++ b/openair2/LAYER2/NR_MAC_UE/nr_ue_scheduler.c
+@@ -54,6 +54,9 @@
+ 
+ #include "LAYER2/NR_MAC_COMMON/nr_mac_extern.h"
+ #include "LAYER2/RLC/rlc.h"
++#include "common/ran_context.h"
++
++extern UE_CONTEXT_t UC;
+ 
+ //#define SRS_DEBUG
+ 
+@@ -3096,6 +3099,8 @@ static bool fill_mac_sdu(NR_UE_MAC_INST_t *mac,
+     header->F = 1;
+     header->LCID = lcid;
+     header->L = htons(sdu_length);
++    // Include the HOL delay value
++    header->HOL_delay = htonl(UC.HOL_delay);
+ 
+ #ifdef ENABLE_MAC_PAYLOAD_DEBUG
+     LOG_I(NR_MAC, "dumping MAC sub-header with length %d: \n", sh_size);
+diff --git a/openair2/LAYER2/nr_rlc/nr_rlc_entity_am.c b/openair2/LAYER2/nr_rlc/nr_rlc_entity_am.c
+index 91985393cb..9f54657f87 100644
+--- a/openair2/LAYER2/nr_rlc/nr_rlc_entity_am.c
++++ b/openair2/LAYER2/nr_rlc/nr_rlc_entity_am.c
+@@ -1791,6 +1791,8 @@ void nr_rlc_entity_am_recv_sdu(nr_rlc_entity_t *_entity,
+   entity->common.bstatus.tx_size += compute_pdu_header_size(entity, sdu)
+                                     + sdu->size;
+ 
++  // Enable tracking of SDU waititng time for computing HOL delay
++  entity->common.avg_time_is_on = true;
+   if (entity->common.avg_time_is_on)
+     sdu->sdu->time_of_arrival = time_average_now();
+ }
+diff --git a/openair2/LAYER2/nr_rlc/nr_rlc_entity_tm.c b/openair2/LAYER2/nr_rlc/nr_rlc_entity_tm.c
+index afad2d23a2..1356ea0572 100644
+--- a/openair2/LAYER2/nr_rlc/nr_rlc_entity_tm.c
++++ b/openair2/LAYER2/nr_rlc/nr_rlc_entity_tm.c
+@@ -155,6 +155,8 @@ void nr_rlc_entity_tm_recv_sdu(nr_rlc_entity_t *_entity,
+   /* update buffer status */
+   entity->common.bstatus.tx_size += sdu->size;
+ 
++  // Enable tracking of SDU waititng time for computing HOL delay
++  entity->common.avg_time_is_on = true;
+   if (entity->common.avg_time_is_on)
+     sdu->sdu->time_of_arrival = time_average_now();
+ }
+diff --git a/openair2/LAYER2/nr_rlc/nr_rlc_entity_um.c b/openair2/LAYER2/nr_rlc/nr_rlc_entity_um.c
+index 4a9a67e40c..1fb0ae712e 100644
+--- a/openair2/LAYER2/nr_rlc/nr_rlc_entity_um.c
++++ b/openair2/LAYER2/nr_rlc/nr_rlc_entity_um.c
+@@ -595,6 +595,8 @@ void nr_rlc_entity_um_recv_sdu(nr_rlc_entity_t *_entity,
+   entity->common.bstatus.tx_size += compute_pdu_header_size(entity, sdu)
+                                     + sdu->size;
+ 
++  // Enable tracking of SDU waititng time for computing HOL delay
++  entity->common.avg_time_is_on = true;
+   if (entity->common.avg_time_is_on)
+     sdu->sdu->time_of_arrival = time_average_now();
+ }
+diff --git a/openair2/LAYER2/nr_rlc/nr_rlc_oai_api.c b/openair2/LAYER2/nr_rlc/nr_rlc_oai_api.c
+index f678b2a0ca..261ceb3855 100644
+--- a/openair2/LAYER2/nr_rlc/nr_rlc_oai_api.c
++++ b/openair2/LAYER2/nr_rlc/nr_rlc_oai_api.c
+@@ -46,6 +46,9 @@ extern RAN_CONTEXT_t RC;
+ #include <stdint.h>
+ 
+ #include <executables/softmodem-common.h>
++#include "common/ran_context.h"
++
++extern UE_CONTEXT_t UC;
+ 
+ static nr_rlc_ue_manager_t *nr_rlc_ue_manager;
+ 
+@@ -177,12 +180,26 @@ tbs_size_t mac_rlc_data_req(const module_id_t  module_idP,
+   nr_rlc_manager_lock(nr_rlc_ue_manager);
+   nr_rlc_ue_t *ue = nr_rlc_manager_get_ue(nr_rlc_ue_manager, rntiP);
+   nr_rlc_entity_t *rb = get_rlc_entity_from_lcid(ue, channel_idP);
++  // ---------------------------------------------------
++  // Allocate structure to retrieve RLC statistics (used for delay extraction)
++  nr_rlc_statistics_t *out = malloc(sizeof(rb->stats));
++  // ----------------------------------------------------
++
+ 
+   if (rb != NULL) {
+     LOG_D(RLC, "MAC PDU to get created for channel_idP:%d \n", channel_idP);
+     rb->set_time(rb, nr_rlc_current_time);
+     maxsize = tb_sizeP;
+     ret = rb->generate_pdu(rb, buffer_pP, maxsize);
++    // -----------------------------------------------------------------------------------
++    // Retrieve RLC statistics and extract Head-of-Line (HOL) delay in microseconds
++    rb->get_stats(rb, out);
++    UC.HOL_delay = out->txsdu_wt_us;
++    // Optional debug logging (can be enabled if needed)
++    //LOG_I(RLC, "Size %d, HOL delay %" PRIu32 " UE context %" PRIu32 "\n", ret, out->txsdu_wt_us, UC.HOL_delay);
++    free(out);
++    // ------------------------------------------------------------------------------------
++
+   } else {
+     LOG_D(RLC, "MAC PDU failed to get created for channel_idP:%d \n", channel_idP);
+     ret = 0;
+diff --git a/targets/PROJECTS/GENERIC-NR-5GC/CONF/nr-ue.conf b/targets/PROJECTS/GENERIC-NR-5GC/CONF/nr-ue.conf
+new file mode 100644
+index 0000000000..b2b832eca9
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-NR-5GC/CONF/nr-ue.conf
+@@ -0,0 +1,8 @@
++uicc0 = {
++  imsi = "208950000000031";
++  key = "0C0A34601D4F07677303652C0462535B";
++  opc= "63bfa50ee6523365ff14c1f45f88737d";
++  dnn= "oai.ipv4";
++  nssai_sst=222;
++  #dnn= "default";
++}
