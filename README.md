@@ -2,7 +2,7 @@
 
 **QUEST: User-Based Quality of Service Aware Uplink Resource Scheduling**
 
-QUEST is an experimental framework for evaluating uplink resource scheduling strategies in 5G NR systems with a focus on user-centric QoS metrics such as latency and throughput.
+QUEST is a QoS-aware UL scheduling framework that exploits the 5G QoS model alongside network and device context to efficiently allocate radio resources.
 
 ---
 
