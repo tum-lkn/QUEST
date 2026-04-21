@@ -5,7 +5,7 @@
 A closely related version is available as a TechRxiv preprint for reference:
 https://www.techrxiv.org/doi/pdf/10.36227/techrxiv.176110126.66841255/v1
 
-QUEST is a QoS-aware UL scheduling framework that exploits the 5G QoS model alongside network and device context to efficiently allocate radio resources.
+QUEST is a QoS-aware UL scheduling framework that leverages the 5G QoS model, along with network and device context, to efficiently allocate radio resources.
 
 ---
 
@@ -85,14 +85,21 @@ Accurate synchronization is required for valid delay measurements.
 
 ### 4. Running Experiments
 
-Use the scripts provided in the `scripts/` directory to start:
+The experiment requires 3 UEs and 1 gNB.  
+A detailed description of the setup and hardware is written in Section VI.A and illustrated in Fig. 5 in the paper. 
+For the best results, we recommend that each UE instance run on a separate PC, and that the Core Network run on a separate PC from the gNB. 
+
+Before starting the scripts, prepare 3 UE Configuration files with 3 different IMSIs. The path to the configuration files is present in the UE start script - `scripts/run_UE.sh`.  
+These IMSI's must also be preconfigured in the AuthenticationSubscription section of the Core Network Database. Further details and examples can be found on the [OAI Deploy tutorial](https://gitlab.eurecom.fr/oai/cn5g/oai-cn5g-fed/-/blob/master/docs/DEPLOY_SA5G_BASIC_DEPLOYMENT.md) 
+
+These conclude the preconfiguring steps on all the deploy scripts are provided in in the `scripts/` directory to start:
 
 - Core Network
 - gNB
 - UE instances
 - IRTT server and clients
 
-Ensure all file paths are correctly configured for your environment.
+Please make sure all file paths are correctly configured for your environment.
 
 ---
 
