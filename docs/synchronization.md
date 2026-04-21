@@ -53,7 +53,7 @@ ethtool -T eth0
 
 ### 1. Master Clock
 
-On the selected master node:
+On the selected source node:
 
 ```bash
 # Start PTP daemon
@@ -65,7 +65,7 @@ sudo phc2sys -c CLOCK_REALTIME -s <interface> -O 0 -w -m
 
 ---
 
-### 2. Client Nodes (UEs, gNB, Core)
+### 2. Sink (client) Nodes (UEs, gNB, Core)
 
 On all other nodes:
 
